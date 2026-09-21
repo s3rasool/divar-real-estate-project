@@ -1,1 +1,0 @@
-# divar-real-estate-project
