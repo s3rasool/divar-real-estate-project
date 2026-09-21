@@ -1,0 +1,26 @@
+# Data manipulation
+pandas==3.0.5
+numpy==2.5.3
+openpyxl==3.1.5
+
+# Visualization
+matplotlib==3.11.1
+seaborn==0.13.2
+plotly==6.9.0
+missingno==0.5.2
+
+# Machine Learning
+scikit-learn==1.6.1
+imbalanced-learn==0.14.2
+scikit-optimize==0.10.2
+scipy==1.18.1
+
+# Jupyter
+jupyter==1.1.1
+notebook==7.6.2
+ipykernel==7.3.0
+ipywidgets==8.1.9
+
+# Utils
+pyyaml==6.0.3
+requests==2.34.2
