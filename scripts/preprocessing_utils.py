@@ -216,15 +216,19 @@ def preprocess_amenity_and_facility_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     out = df.copy()
 
-    # ۱. حذف ستون‌های کم‌کاربرد با درصد داده مفقود بسیار بالا (بالای ۹۵٪)
-    drop_bool_cols = [
-        'has_business_deed', 'has_water', 'has_electricity', 'has_gas',
-        'has_security_guard', 'has_barbecue', 'has_pool', 'has_jacuzzi', 'has_sauna', 'rent_to_single'
-    ]
+    # ۱. حذف ستون بدون پوشش داده (نال تقریباً ۱۰۰٪)
+    drop_bool_cols = ['rent_to_single']
     out = out.drop(columns=drop_bool_cols, errors='ignore')
 
-    # ۲. استانداردسازی ویژگی‌های بولین اصلی و تبدیل به boolean
-    main_bool_cols = ['has_balcony', 'has_elevator', 'has_warehouse', 'has_parking', 'is_rebuilt']
+    # ۲. استانداردسازی همه‌ی ویژگی‌های بولین و تبدیل به boolean
+    #    (شامل ستون‌های کم‌پوشش که قبلاً حذف می‌شدند - طبق پیشنهاد دوستمون
+    #    اینها نگهداری می‌شوند تا برای تحلیل توزیع مکانی امکاناتی مثل
+    #    استخر/باربیکیو/نگهبان قابل استفاده باشند)
+    main_bool_cols = [
+        'has_balcony', 'has_elevator', 'has_warehouse', 'has_parking', 'is_rebuilt',
+        'has_business_deed', 'has_water', 'has_electricity', 'has_gas',
+        'has_security_guard', 'has_barbecue', 'has_pool', 'has_jacuzzi', 'has_sauna'
+    ]
     
     bool_map = {
         'true': True,
@@ -337,56 +341,132 @@ def preprocess_financial_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def preprocess_time_and_location_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    پیش‌پردازش و تمیزکاری ویژگی‌های زمانی و مکان‌محور (مختصات جغرافیایی و زمان ثبت آگهی).
+    پیش‌پردازش و تمیزکاری جامع ویژگی‌های زمانی (شمسی/میلادی) و مکان‌محور (مختصات، اعتبار پین و فاصله تا مرکز شهر).
     """
     out = df.copy()
 
-    # ۱. حذف ستون‌های شعاع مکان و تاریخ متنی اولیه
-    drop_cols = ["location_radius"]
+    # ۱. حذف ستون‌های کم‌کاربرد
+    drop_cols = ["location_radius", "rent_to_single"]
     out = out.drop(columns=drop_cols, errors="ignore")
 
-    # ۲. اعتبارسنجی و فیلتر مختصات جغرافیایی در محدوده ایران
-    lat_min, lat_max = 25.0, 40.0
-    lon_min, lon_max = 44.0, 63.0
+    # ۲. پیش‌پردازش زمان و استخراج تقویم شمسی
+    if "created_at_month" in out.columns:
+        created_dt = pd.to_datetime(out["created_at_month"], errors="coerce")
+        
+        # استخراج ویژگی‌های میلادی پایه
+        out["created_year"] = created_dt.dt.year.astype("Int64")
+        out["created_month"] = created_dt.dt.month.astype("Int64")
+        
+        # محاسبه month_index و is_main_period (دوره اصلی آگهی‌ها)
+        first_date = created_dt.min()
+        if pd.notna(first_date):
+            out["month_index"] = (
+                (created_dt.dt.year - first_date.year) * 12 + (created_dt.dt.month - first_date.month)
+            ).astype("Int64")
+        
+        out["is_main_period"] = created_dt.between("2024-05-01", "2024-12-01").astype("boolean")
 
-    if "location_latitude" in out.columns and "location_longitude" in out.columns:
-        out["location_latitude"] = pd.to_numeric(out["location_latitude"], errors="coerce")
-        out["location_longitude"] = pd.to_numeric(out["location_longitude"], errors="coerce")
+        # تبدیل به شمسی با jdatetime
+        try:
+            import jdatetime
+            
+            month_names = [
+                "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+                "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"
+            ]
+            
+            unique_months = created_dt.dropna().unique()
+            to_jalali = {}
+            for m in unique_months:
+                mid_month = (m + pd.Timedelta(days=14)).date()
+                to_jalali[m] = jdatetime.date.fromgregorian(date=mid_month)
 
-        valid_lat = out["location_latitude"].between(lat_min, lat_max)
-        valid_lon = out["location_longitude"].between(lon_min, lon_max)
-        valid_coord = valid_lat & valid_lon
+            jalali_series = created_dt.map(to_jalali)
+            
+            out["jalali_year"] = jalali_series.map(lambda d: d.year if pd.notna(d) else np.nan).astype("Int64")
+            out["jalali_month"] = jalali_series.map(lambda d: d.month if pd.notna(d) else np.nan).astype("Int64")
+            
+            def make_jalali_label(d):
+                if pd.isna(d):
+                    return pd.NA
+                return f"{d.year} {month_names[d.month - 1]}"
 
-        # خارج از محدوده ایران به NaN تبدیل می‌شود
-        out.loc[~valid_coord, ["location_latitude", "location_longitude"]] = np.nan
+            out["jalali_label"] = jalali_series.map(make_jalali_label).astype("string")
 
-        # ۳. تبدیل مختصات به UTM (بر مبنای زون 39)
+        except ImportError:
+            print("کتابخانه 'jdatetime' نصب نیست. استخراج تقویم شمسی نادیده گرفته شد.")
+
+    # ۳. اعتبارسنجی و پاک‌سازی مختصات جغرافیایی
+    lat_col, lon_col = "location_latitude", "location_longitude"
+    
+    if lat_col in out.columns and lon_col in out.columns:
+        out[lat_col] = pd.to_numeric(out[lat_col], errors="coerce")
+        out[lon_col] = pd.to_numeric(out[lon_col], errors="coerce")
+        
+        out["coord_status"] = "ok"
+        out.loc[out[lat_col].isna() | out[lon_col].isna(), "coord_status"] = "missing"
+
+        # الف) فیلتر محدوده جغرافیایی ایران
+        inside_iran = out[lat_col].between(25.0, 40.0) & out[lon_col].between(44.0, 64.0)
+        outside = out[lat_col].notna() & ~inside_iran
+        out.loc[outside, "coord_status"] = "kharej"
+        out.loc[outside, [lat_col, lon_col]] = np.nan
+
+        # ب) شناسایی پین‌های اشتباه (پین‌های یکسان ثبت‌شده در چند شهر مختلف)
+        has_coord = out[lat_col].notna() & out[lon_col].notna()
+        if has_coord.any() and "city_slug" in out.columns:
+            pins = out[has_coord].groupby([lat_col, lon_col])
+            out["pin_repeat_count"] = pins[lat_col].transform("size").astype("Int64")
+            
+            cities_per_pin = pins["city_slug"].transform("nunique")
+            bad_idx = cities_per_pin[cities_per_pin > 1].index
+            
+            out.loc[bad_idx, "coord_status"] = "pin_chand_shahri"
+            out.loc[bad_idx, [lat_col, lon_col]] = np.nan
+
+        # ج) محاسبه فاصله تا مرکز شهر (Haversine) و حذف نقاط پرت (> ۵۰ کیلومتر)
+        has_valid_coord = out[lat_col].notna() & out[lon_col].notna()
+        if has_valid_coord.any() and "city_slug" in out.columns:
+            city_counts = out.groupby("city_slug")[lat_col].count()
+            centers = out.groupby("city_slug")[[lat_col, lon_col]].median()
+            valid_centers = centers[city_counts >= 30]
+
+            center_lat = out["city_slug"].map(valid_centers[lat_col])
+            center_lon = out["city_slug"].map(valid_centers[lon_col])
+
+            # فرمول Haversine به کیلومتر
+            lat1, lon1 = np.radians(out[lat_col]), np.radians(out[lon_col])
+            lat2, lon2 = np.radians(center_lat), np.radians(center_lon)
+            
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+            a = np.sin(dlat / 2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
+            out["dist_to_city_km"] = (6371 * 2 * np.arcsin(np.sqrt(a))).round(1)
+
+            far_mask = out["dist_to_city_km"] > 50
+            out.loc[far_mask, "coord_status"] = "door_az_shahr"
+            out.loc[far_mask, [lat_col, lon_col]] = np.nan
+
+        # د) تبدیل به UTM (زون 39)
         try:
             import utm
 
-            valid_mask = out["location_latitude"].notna() & out["location_longitude"].notna()
+            valid_mask = out[lat_col].notna() & out[lon_col].notna()
             out["location_utm_x"] = np.nan
             out["location_utm_y"] = np.nan
 
             if valid_mask.any():
-                lats = out.loc[valid_mask, "location_latitude"].values
-                lons = out.loc[valid_mask, "location_longitude"].values
+                lats = out.loc[valid_mask, lat_col].values
+                lons = out.loc[valid_mask, lon_col].values
                 utm_x, utm_y, _, _ = utm.from_latlon(lats, lons, force_zone_number=39)
                 out.loc[valid_mask, "location_utm_x"] = utm_x
                 out.loc[valid_mask, "location_utm_y"] = utm_y
 
         except ImportError:
             print("کتابخانه 'utm' نصب نیست. محاسبه ستون‌های location_utm نادیده گرفته شد.")
-
-    # ۴. استخراج ویژگی‌های زمانی (سال و ماه)
-    if "created_at_month" in out.columns:
-        created_dt = pd.to_datetime(out["created_at_month"], errors="coerce")
-        out["created_year"] = created_dt.dt.year
-        out["created_month"] = created_dt.dt.month
-        out = out.drop(columns=["created_at_month"], errors="ignore")
+        out = out.drop(columns=["created_at_month"])   # ← این خط اضافه بشه
 
     return out
-
 
 def run_full_preprocessing_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     """
