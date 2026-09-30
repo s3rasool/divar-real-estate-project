@@ -468,6 +468,41 @@ def preprocess_time_and_location_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
+
+def extract_amenities_from_text(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    پر کردن مقادیر نال در ۵ ستون اصلی امکانات از طریق جستجو در متن (بدون ایجاد ستون جدید).
+    """
+    out = df.copy()
+
+    # ۱. یکسان‌سازی متنی عنوان و توضیحات
+    text_corpus = (
+        (out['title'].fillna('') + ' ' + out['description'].fillna(''))
+        .astype(str)
+        .str.replace('ي', 'ی', regex=False)
+        .str.replace('ك', 'ک', regex=False)
+        .str.lower()
+    )
+
+    # ۲. الگوهای جامع (Regex) برای پوشش نگارش‌های مختلف
+    patterns = {
+        'has_balcony': 'بالکن|تراس|بهارخواب|پاسیو',
+        'has_elevator': 'آسانسور|اسانسور|الواتور',
+        'has_security_guard': 'نگهبان|لابی‌من|لابی من|سرایدار|حراست',
+        'has_barbecue': 'باربیکیو|باربکیو|باربیکو|کباب‌پز|کباب پز',
+        'has_pool': 'استخر',
+    }
+
+    # ۳. بازنویسی و اصلاح مستقیم همان ستون‌های اصلی
+    for col, pattern in patterns.items():
+        text_match = text_corpus.str.contains(pattern, regex=True)
+        if col in out.columns:
+            # ترکیب ارزش قبلی با متن و بازنویسی روی همان ستون
+            existing_val = out[col] == True
+            out[col] = (existing_val | text_match).astype('boolean')
+
+    return out
+
 def run_full_preprocessing_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     """
     اجرای کامل و متوالی تمامی توابع پیش‌پردازش رو مجموعه داده.
@@ -478,6 +513,7 @@ def run_full_preprocessing_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     out = preprocess_numerical_building_features(out)
     out = preprocess_daily_rental_and_text_features(out)
     out = preprocess_amenity_and_facility_features(out)
+    out = extract_amenities_from_text(out)
     out = preprocess_financial_features(out)
     out = preprocess_time_and_location_features(out)
     return out
