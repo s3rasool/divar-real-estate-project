@@ -12,32 +12,42 @@
 
 ```text
 .
-└── real-estate
-    ├── data/                              # داده‌های خام و فایل پردازش‌شده
-    │   ├── Divar_cleaned.parquet          # خروجی نهایی و تمیزشده‌ی pipeline
-    │   ├── Divar.csv                      # داده‌ی خام اصلی
-    │   └── iran_city_classification.csv   # داده‌ی کمکی طبقه‌بندی شهرها
-    ├── eda/                               # نوت‌بوک‌های تحلیل آماری و اکتشافی (EDA)
-    │   ├── eda_01.ipynb
-    │   ├── eda_02.ipynb
-    │   └── eda_03_04_06.ipynb
-    ├── notebook/
-    │   ├── main_pipeline.ipynb            # نوت‌بوک اصلی پروژه (اجرای مراحل خط لوله)
-    │   └── notebook-documentation/        # نوت‌بوک‌های آزمایشی و پیش‌پردازش اولیه اعضای تیم
-    │       ├── 01a_preprocessing.ipynb
-    │       ├── 02a_preprocessing.ipynb
-    │       ├── araz_preprocessing.ipynb
-    │       ├── boolean_feature.ipynb
-    │       ├── finance_cleaning.ipynb
-    │       ├── shahab_preprocessing.ipynb
-    │       └── time_location_preprocessing.ipynb
-    ├── scripts/                           # توابع ماژولار و کمکی پایتون
-    │   └── preprocessing_utils.py
-    ├── requirements.txt                   # کتابخانه‌ها و وابستگی‌های پروژه
-    └── README.md                          # مستندات پروژه
-```
-
----
+├── data
+│   ├── Divar_cleaned.parquet
+│   ├── Divar.csv
+│   └── iran_city_classification.csv
+├── eda
+│   ├── eda_01.ipynb
+│   ├── eda_02.ipynb
+│   ├── eda_03_04_06.ipynb
+│   ├── eda_05.ipynb
+│   ├── eda_07.ipynb
+│   ├── eda_08.ipynb
+│   └── eda_09.ipynb
+├── hypothesis-test
+│   ├── 01_hypothesis_tests.ipynb
+│   ├── 02_hypothesis_tests.ipynb
+│   └── 03_04_hypothesis_tests.ipynb
+├── notebook
+│   ├── main_pipeline.ipynb
+│   └── notebook-documentation
+│       ├── 01a_preprocessing.ipynb
+│       ├── 02a_preprocessing.ipynb
+│       ├── araz_preprocessing.ipynb
+│       ├── boolean_feature.ipynb
+│       ├── finance_cleaning.ipynb
+│       ├── shahab_preprocessing.ipynb
+│       └── time_location_preprocessing.ipynb
+├── prediction
+│   └── house_price_prediction.ipynb
+├── README.md
+├── recommender-system
+│   └── real_state_clustering.ipynb
+├── requirements.txt
+└── scripts
+    ├── preprocessing_utils.py
+    └── __pycache__
+        └── preprocessing_utils.cpython-312.pyc
 
 <div dir="rtl">
 
