@@ -77,7 +77,13 @@ def preprocess_numerical_building_features(df: pd.DataFrame) -> pd.DataFrame:
             'چهار': 4,
             'پنج یا بیشتر': 5
         }
-        df['rooms_count'] = df['rooms_count'].map(rooms_map).astype('Int64')
+        rc = df['rooms_count']
+        mapped = pd.to_numeric(rc.map(rooms_map), errors='coerce')
+        numeric = pd.to_numeric(rc, errors='coerce')
+        df['rooms_count'] = mapped.fillna(numeric).astype('Int64')
+        unmapped = df['rooms_count'].isna() & rc.notna()
+        if unmapped.any():
+            print(f"[rooms_count] مقادیر نگاشت‌نشده: {rc[unmapped].unique()}")
 
     # ۳. پاک‌سازی ستون طبقه (floor)
     if 'floor' in df.columns:
@@ -240,8 +246,11 @@ def preprocess_amenity_and_facility_features(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in main_bool_cols:
         if col in out.columns:
-            cleaned_series = out[col].astype(str).str.lower().str.strip().map(bool_map)
-            out[col] = cleaned_series.astype('boolean')
+            raw = out[col].astype(str).str.lower().str.strip()
+            unmapped = raw[~raw.isin(bool_map.keys()) & (raw != '<na>')].unique()
+            if len(unmapped) > 0:
+                print(f"[{col}] مقادیر نگاشت‌نشده: {unmapped}")
+            out[col] = raw.map(bool_map).astype('boolean')
 
     # ۳. استانداردسازی ویژگی‌های دسته‌ای تأسیسات (سرمایش، گرمایش، سرویس بهداشتی و ...)
     facility_cols = [
@@ -294,10 +303,12 @@ def preprocess_financial_features(df: pd.DataFrame) -> pd.DataFrame:
         if col in out.columns:
             out[col] = (
                 out[col]
-                .replace({"True": True, "False": False})
+                .astype("string")
+                .str.strip()
+                .str.lower()
+                .map({"true": True, "false": False})
                 .astype("boolean")
             )
-
     transformed_cols = ["transformed_credit", "transformed_rent"]
     suspicious_low_threshold = 10_000
 
@@ -306,36 +317,37 @@ def preprocess_financial_features(df: pd.DataFrame) -> pd.DataFrame:
             out[f"{col}_suspicious_low"] = out[col].notna() & (out[col] <= suspicious_low_threshold)
 
     # ۲. استخراج ویژگی جدید برای تشخیص هوشمند «رهن کامل» (inferred_full_credit)
-    # ۲. استخراج ویژگی جدید برای تشخیص هوشمند «رهن کامل» (inferred_full_credit)
     out["inferred_full_credit"] = pd.Series(pd.NA, index=out.index, dtype="boolean")
 
-    if "cat2_slug" in out.columns:
+    needed = ["rent_value", "credit_value", "price_value", "price_mode"]
+    if "cat2_slug" in out.columns and all(c in out.columns for c in needed):
         rental_category = out["cat2_slug"].str.contains("rent", case=False, na=False)
-        explicit_full_credit = out.get("rent_type") == "full_credit"
 
-        # شرایط رهن کامل قوی (اجاره صفر، مبلغ رهن مثبت، بدون قیمت فروش)
+        if "rent_type" in out.columns:
+            explicit_full_credit = (out["rent_type"] == "full_credit").fillna(False).astype(bool)
+        else:
+            explicit_full_credit = pd.Series(False, index=out.index)
+
         strong_full_credit = (
             rental_category
-            & (out.get("rent_value") == 0)
-            & (out.get("credit_value") > 0)
-            & out.get("price_mode").isna()
-            & out.get("price_value").isna()
+            & (out["rent_value"] == 0)
+            & (out["credit_value"] > 0)
+            & out["price_mode"].isna()
+            & out["price_value"].isna()
         )
 
         out.loc[explicit_full_credit | strong_full_credit, "inferred_full_credit"] = True
 
-        # املاکی که قطعا رهن کامل نیستند
         definitely_not_full_credit = (
-            (out.get("rent_value") > 0)
-            | out.get("price_value").notna()
-            | out.get("price_mode").notna()
+            (out["rent_value"] > 0)
+            | out["price_value"].notna()
+            | out["price_mode"].notna()
         )
 
         out.loc[
             definitely_not_full_credit & ~explicit_full_credit,
             "inferred_full_credit"
         ] = False
-
     return out
 
 
@@ -464,8 +476,7 @@ def preprocess_time_and_location_features(df: pd.DataFrame) -> pd.DataFrame:
 
         except ImportError:
             print("کتابخانه 'utm' نصب نیست. محاسبه ستون‌های location_utm نادیده گرفته شد.")
-        out = out.drop(columns=["created_at_month"])   # ← این خط اضافه بشه
-
+    out = out.drop(columns=["created_at_month"], errors="ignore") 
     return out
 
 
@@ -495,12 +506,15 @@ def extract_amenities_from_text(df: pd.DataFrame) -> pd.DataFrame:
 
     # ۳. بازنویسی و اصلاح مستقیم همان ستون‌های اصلی
     for col, pattern in patterns.items():
-        text_match = text_corpus.str.contains(pattern, regex=True)
         if col in out.columns:
-            # ترکیب ارزش قبلی با متن و بازنویسی روی همان ستون
-            existing_val = out[col] == True
-            out[col] = (existing_val | text_match).astype('boolean')
-
+            has_word = text_corpus.str.contains(pattern, regex=True)
+            negated = text_corpus.str.contains(
+                rf'(?:بدون|فاقد)\s*(?:{pattern})|(?:{pattern})\s*(?:ندارد|نداره|نیست)',
+                regex=True
+            )
+            text_match = has_word & ~negated
+            existing = out[col].astype('boolean')
+            out[col] = existing.mask(existing.isna() & text_match, True)
     return out
 
 def run_full_preprocessing_pipeline(df: pd.DataFrame) -> pd.DataFrame:
